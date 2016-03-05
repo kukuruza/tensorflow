@@ -39,6 +39,7 @@ from __future__ import print_function
 from datetime import datetime
 import os.path
 import time
+import math
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -57,71 +58,114 @@ tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
 
 
+def evaluate_set (sess, top_k_op, num_examples):
+  """Convenience function to run evaluation for for every batch. 
+     Sum the number of correct predictions and output one precision value.
+  Args:
+    sess:          current Session
+    top_k_op:      tensor of type tf.nn.in_top_k
+    num_examples:  number of examples to evaluate
+  """
+  num_iter = int(math.ceil(num_examples / FLAGS.batch_size))
+  true_count = 0  # Counts the number of correct predictions.
+  total_sample_count = num_iter * FLAGS.batch_size
+
+  for step in xrange(num_iter):
+    predictions = sess.run([top_k_op])
+    true_count += np.sum(predictions)
+
+  # Compute precision
+  return true_count / total_sample_count
+
+
+
 def train():
   """Train CIFAR-10 for a number of steps."""
   with tf.Graph().as_default():
-    global_step = tf.Variable(0, trainable=False)
+    with tf.variable_scope("model") as scope:
+      global_step = tf.Variable(0, trainable=False)
 
-    # Get images and labels for CIFAR-10.
-    images, labels = cifar10.distorted_inputs()
+      # Get images and labels for CIFAR-10.
+      images, labels = cifar10.distorted_inputs()      
+      images_eval, labels_eval = cifar10.inputs(eval_data=True)
 
-    # Build a Graph that computes the logits predictions from the
-    # inference model.
-    logits = cifar10.inference(images)
+      # Build a Graph that computes the logits predictions from the
+      # inference model.
+      logits = cifar10.inference(images)
+      scope.reuse_variables()
+      logits_eval = cifar10.inference(images_eval)
 
-    # Calculate loss.
-    loss = cifar10.loss(logits, labels)
+      # Calculate loss.
+      loss = cifar10.loss(logits, labels)
 
-    # Build a Graph that trains the model with one batch of examples and
-    # updates the model parameters.
-    train_op = cifar10.train(loss, global_step)
+      # For evaluation
+      top_k      = tf.nn.in_top_k (logits,      labels,      1)
+      top_k_eval = tf.nn.in_top_k (logits_eval, labels_eval, 1)
 
-    # Create a saver.
-    saver = tf.train.Saver(tf.all_variables())
+      # Add precision summary
+      summary_train_prec = tf.placeholder(tf.float32)
+      summary_eval_prec  = tf.placeholder(tf.float32)
+      tf.scalar_summary('precision/train', summary_train_prec)
+      tf.scalar_summary('precision/eval',  summary_eval_prec)
 
-    # Build the summary operation based on the TF collection of Summaries.
-    summary_op = tf.merge_all_summaries()
+      # Build a Graph that trains the model with one batch of examples and
+      # updates the model parameters.
+      train_op = cifar10.train(loss, global_step)
 
-    # Build an initialization operation to run below.
-    init = tf.initialize_all_variables()
+      # Create a saver.
+      saver = tf.train.Saver(tf.all_variables())
 
-    # Start running operations on the Graph.
-    sess = tf.Session(config=tf.ConfigProto(
-        log_device_placement=FLAGS.log_device_placement))
-    sess.run(init)
+      # Build the summary operation based on the TF collection of Summaries.
+      summary_op = tf.merge_all_summaries()
 
-    # Start the queue runners.
-    tf.train.start_queue_runners(sess=sess)
+      # Build an initialization operation to run below.
+      init = tf.initialize_all_variables()
 
-    graph_def = sess.graph.as_graph_def(add_shapes=True)
-    summary_writer = tf.train.SummaryWriter(FLAGS.train_dir,
-                                            graph_def=graph_def)
+      # Start running operations on the Graph.
+      sess = tf.Session(config=tf.ConfigProto(
+	  log_device_placement=FLAGS.log_device_placement))
+      sess.run(init)
 
-    for step in xrange(FLAGS.max_steps):
-      start_time = time.time()
-      _, loss_value = sess.run([train_op, loss])
-      duration = time.time() - start_time
+      # Start the queue runners.
+      tf.train.start_queue_runners(sess=sess)
 
-      assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
+      summary_writer = tf.train.SummaryWriter(FLAGS.train_dir,
+					      graph_def=sess.graph_def)
 
-      if step % 10 == 0:
-        num_examples_per_step = FLAGS.batch_size
-        examples_per_sec = num_examples_per_step / duration
-        sec_per_batch = float(duration)
+      for step in xrange(FLAGS.max_steps):
+	start_time = time.time()
+	_, loss_value = sess.run([train_op, loss])
+	duration = time.time() - start_time
 
-        format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; %.3f '
-                      'sec/batch)')
-        print (format_str % (datetime.now(), step, loss_value,
-                             examples_per_sec, sec_per_batch))
+	assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
 
-      if step % 100 == 0:
-        summary_str = sess.run(summary_op)
-        summary_writer.add_summary(summary_str, step)
+	if step % 10 == 0:
+	  num_examples_per_step = FLAGS.batch_size
+	  examples_per_sec = num_examples_per_step / duration
+	  sec_per_batch = float(duration)
 
-      # Save the model checkpoint periodically.
-      if step % 1000 == 0 or (step + 1) == FLAGS.max_steps:
-        checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
-        saver.save(sess, checkpoint_path, global_step=step)
+	  format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; %.3f '
+			'sec/batch)')
+	  print (format_str % (datetime.now(), step, loss_value,
+			       examples_per_sec, sec_per_batch))
+
+        EVAL_STEP = 10
+        EVAL_NUM_EXAMPLES = 1024
+        if step % EVAL_STEP == 0:
+	  prec_train = evaluate_set (sess, top_k,      EVAL_NUM_EXAMPLES)
+	  prec_eval  = evaluate_set (sess, top_k_eval, EVAL_NUM_EXAMPLES)
+          print('%s: precision train = %.3f' % (datetime.now(), prec_train))
+          print('%s: precision eval  = %.3f' % (datetime.now(), prec_eval))
+
+	if step % 100 == 0:
+	  summary_str = sess.run(summary_op, feed_dict={summary_train_prec: prec_train,
+                                                        summary_eval_prec:  prec_eval})
+	  summary_writer.add_summary(summary_str, step)
+
+	# Save the model checkpoint periodically.
+	if step % 1000 == 0 or (step + 1) == FLAGS.max_steps:
+	  checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
+	  saver.save(sess, checkpoint_path, global_step=step)
 
 
 def main(argv=None):  # pylint: disable=unused-argument

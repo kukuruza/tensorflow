@@ -147,7 +147,8 @@ def distorted_inputs():
     raise ValueError('Please supply a data_dir')
   data_dir = os.path.join(FLAGS.data_dir, 'cifar-10-batches-bin')
   return cifar10_input.distorted_inputs(data_dir=data_dir,
-                                        batch_size=FLAGS.batch_size)
+                                        batch_size=FLAGS.batch_size,
+                                        dataset_name='/train')
 
 
 def inputs(eval_data):
@@ -167,7 +168,8 @@ def inputs(eval_data):
     raise ValueError('Please supply a data_dir')
   data_dir = os.path.join(FLAGS.data_dir, 'cifar-10-batches-bin')
   return cifar10_input.inputs(eval_data=eval_data, data_dir=data_dir,
-                              batch_size=FLAGS.batch_size)
+                              batch_size=FLAGS.batch_size,
+                              dataset_name='/eval' if eval_data else '/train')
 
 
 def inference(images):

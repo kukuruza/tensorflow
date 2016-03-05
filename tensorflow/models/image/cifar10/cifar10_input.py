@@ -97,7 +97,7 @@ def read_cifar10(filename_queue):
 
 
 def _generate_image_and_label_batch(image, label, min_queue_examples,
-                                    batch_size, shuffle):
+                                    batch_size, shuffle, dataset_name):
   """Construct a queued batch of images and labels.
 
   Args:
@@ -107,6 +107,8 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
       in the queue that provides of batches of examples.
     batch_size: Number of images per batch.
     shuffle: boolean indicating whether to use a shuffling queue.
+    dataset_name: A tag to add to the image_summary. Example '/train' or '/eval'
+                  Must be used in case of several input pipelines.
 
   Returns:
     images: Images. 4D tensor of [batch_size, height, width, 3] size.
@@ -130,12 +132,12 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
         capacity=min_queue_examples + 3 * batch_size)
 
   # Display the training images in the visualizer.
-  tf.image_summary('images', images)
+  tf.image_summary('images' + dataset_name, images)
 
   return images, tf.reshape(label_batch, [batch_size])
 
 
-def distorted_inputs(data_dir, batch_size):
+def distorted_inputs(data_dir, batch_size, dataset_name):
   """Construct distorted input for CIFAR training using the Reader ops.
 
   Args:
@@ -191,10 +193,10 @@ def distorted_inputs(data_dir, batch_size):
   # Generate a batch of images and labels by building up a queue of examples.
   return _generate_image_and_label_batch(float_image, read_input.label,
                                          min_queue_examples, batch_size,
-                                         shuffle=True)
+                                         shuffle=True, dataset_name)
 
 
-def inputs(eval_data, data_dir, batch_size):
+def inputs(eval_data, data_dir, batch_size, dataset_name):
   """Construct input for CIFAR evaluation using the Reader ops.
 
   Args:
@@ -244,4 +246,4 @@ def inputs(eval_data, data_dir, batch_size):
   # Generate a batch of images and labels by building up a queue of examples.
   return _generate_image_and_label_batch(float_image, read_input.label,
                                          min_queue_examples, batch_size,
-                                         shuffle=False)
+                                         shuffle=False, dataset_name)
